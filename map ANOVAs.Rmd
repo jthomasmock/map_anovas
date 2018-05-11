@@ -1,0 +1,136 @@
+---
+title: "bone_ANOVAs"
+author: "Tom"
+date: "May 11, 2018"
+output: html_document
+---
+
+# Load Libraries
+
+```{r}
+library(tidyverse)
+library(datasets)
+library(writexl)
+library(broom)
+```
+
+
+## Generate data sets
+
+The toothgrowth dataset has two treatments (Vitamin C and OJ, with 3 doses), doesn't EXACTLY match your criteria
+
+```{r}
+# Generate the data, creating multiple fake Dependent Variables
+bone_df <- as.tibble(ToothGrowth) %>% 
+    mutate(dose = factor(dose),
+           molars = len*2,
+           crunchers = len*3,
+           canines = len*3.14,
+           femur = len*37) %>% 
+    select(supp, dose, everything())
+
+# for playing around with if you wanna run ONE aov and tukey.
+bone_len <- bone_df %>% 
+    select(dose, supp, len)
+
+bone_molars <- bone_df %>% 
+    select(dose, supp, molars)
+
+bone_crunchers <- bone_df %>% 
+    select(dose, supp, crunchers)
+```
+
+```{r}
+# exploratory graph
+bone_df %>% 
+    ggplot(aes(x = dose, y = femur)) +
+    geom_boxplot() +
+    facet_grid(~supp)
+```
+## Setup and run the ANOVAs
+
+Notice I am selecting ALL the dependent variables since I have one wide dataset with unchanging factors. We do this with our "master" data file that has all of our dependent variables in an individual column with matching factors/ids. This is also how I set up the dataset for this experiment. You can run how ever many dependent variables you wanted as long as they are IN the dataset.
+
+```{r}
+# select the depedent variables of interest(exclude the factors)
+all_anova <- bone_df %>% 
+    select(len:femur) %>% 
+    map(~ aov(lm(.x ~ supp * dose, data = bone_df)))
+
+all_anova 
+# notice there is a list of dataframes, where each dataset is named after
+# the initial column name. You could select from this list of dfs with all_anova$name
+
+# and the broom::tidy output as example
+tidy(all_anova$len)
+
+# quick chec to show you what the TukeyHSD looks like 
+# we need to specify the interaction with which = 
+tidy(TukeyHSD(all_anova$len, which = "supp:dose"))
+```
+
+
+We can now do a few things! I map broom::tidy() to get a nice clean output, round p value to 5 decimal places, and generate a "SIG" or blank if not significant. You can either stack the dataframe with bind_rows and then save as a .csv, .xlsx, or even just keep as a RDS file. 
+
+```{r}
+# this does all the nice things and ends up with one LONG dataframe 
+# with a label for each set of main effects/interactions/residuals.
+all_anova %>% 
+    map(., broom::tidy) %>% 
+    map(~ mutate(.x, p.value = round(p.value, 5))) %>%
+    map( ~ mutate(.x, sig = case_when(p.value <= 0.05 ~ "SIG",
+                                  p.value > 0.05 ~ ""))) %>%
+    bind_rows(.id = "source")
+```
+
+
+You can do the same thing as above with a `map_dfr` call as well, just make sure to use `.id = "source"` so that you keep the names from list of dataframes.
+
+```{r, eval = F}
+all_anova %>% 
+    map(., broom::tidy) %>% 
+    map(~ mutate(.x, p.value = round(p.value, 5))) %>%
+    map_dfr(~ mutate(.x, sig = case_when(p.value <= 0.05 ~ "SIG",
+                                  p.value > 0.05 ~ "")), .id = "source")
+```
+
+Alternatively I save to indivdual tabs of an excel file, as this is what my boss typically wants to see. Since this is a named list of dataframes, we get nice named tabs on the excel sheet.
+
+```{r}
+# this does all the nice things and ends up writing the list of dataframes
+# to individuals tabs of an excel file 
+all_anova %>% 
+    map(., broom::tidy) %>% # notice that map(., tidy) is same as map(~ tidy(.))
+    map(~ mutate(.x, p.value = round(p.value, 5))) %>%
+    map(~ mutate(.x, sig = case_when(p.value <= 0.05 ~ "SIG",
+                                  p.value > 0.05 ~ ""))) %>%
+    writexl::write_xlsx(., "bone_anovas_type3.xlsx")
+
+```
+
+## Tukey post-hocs
+
+Now that we have our ANOVAs taken care of, we can run our post-hocs on the ANOVAs. You can either bind into one LONG dataframe (like before w/ anova), or you can bind columns with `map_dfc`, or keep as a list and write to excel.
+
+
+```{r}
+# long dataframe
+all_anova %>% 
+    map(~ tidy(TukeyHSD(., which = 'supp:dose'))) %>% 
+    bind_rows(.id = "source")
+```
+
+```{r}
+# wide - less than ideal as I don't know a way to generate proper names
+# it just will add a number to each of the columns.
+all_anova %>% 
+    map_dfc(~ tidy(TukeyHSD(., which = 'supp:dose')))
+```
+
+```{r}
+# write to excel
+all_anova %>% 
+    map(~ tidy(TukeyHSD(., which = 'supp:dose'))) %>% 
+    writexl::write_xlsx(., "tidy_tukey.xlsx")
+```
+
