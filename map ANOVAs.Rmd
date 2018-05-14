@@ -104,7 +104,7 @@ all_anova %>%
     map(~ mutate(.x, p.value = round(p.value, 5))) %>%
     map(~ mutate(.x, sig = case_when(p.value <= 0.05 ~ "SIG",
                                   p.value > 0.05 ~ ""))) %>%
-    writexl::write_xlsx(., "bone_anovas_type3.xlsx")
+    writexl::write_xlsx(., "bone_anovas_type1.xlsx")
 
 ```
 
